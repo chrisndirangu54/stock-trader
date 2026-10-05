@@ -18,6 +18,7 @@ class BrokerSnapshot:
     connected: bool
     equity: float | None
     positions: Dict[str, float]
+    position_details: list[dict]
     message: str
     timestamp: str
 
@@ -46,9 +47,10 @@ def broker_snapshot(name: str) -> BrokerSnapshot:
             raise ValueError(name)
         equity = float(adapter.account_equity())
         positions = adapter.positions()
-        return BrokerSnapshot(name, configured, True, equity, positions, "Connected", now)
+        details = adapter.position_details()
+        return BrokerSnapshot(name, configured, True, equity, positions, details, "Connected", now)
     except Exception as e:
-        return BrokerSnapshot(name, configured, False, None, {}, str(e), now)
+        return BrokerSnapshot(name, configured, False, None, {}, [], str(e), now)
 
 
 def all_broker_snapshots() -> list[BrokerSnapshot]:
@@ -73,9 +75,19 @@ def snapshots_frame(snaps: list[BrokerSnapshot]) -> pd.DataFrame:
 def positions_frame(snaps: list[BrokerSnapshot]) -> pd.DataFrame:
     rows = []
     for snap in snaps:
-        for symbol, qty in snap.positions.items():
-            rows.append({"broker": snap.broker, "symbol": symbol, "qty": qty})
-    return pd.DataFrame(rows, columns=["broker", "symbol", "qty"])
+        if snap.position_details:
+            for p in snap.position_details:
+                row = {"broker": snap.broker, **p}
+                rows.append(row)
+        else:
+            for symbol, qty in snap.positions.items():
+                rows.append({"broker": snap.broker, "symbol": symbol, "qty": qty})
+    cols = ["broker", "symbol", "qty", "market_value", "avg_entry_price", "unrealized_pnl", "unrealized_pnl_pct"]
+    out = pd.DataFrame(rows)
+    for c in cols:
+        if c not in out.columns:
+            out[c] = None
+    return out[cols]
 
 
 def estimate_live_pnl(position_df: pd.DataFrame, prices: Dict[str, float]) -> pd.DataFrame:
