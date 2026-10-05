@@ -46,3 +46,49 @@ python trading_system_sota.py live --universe crypto --execute
 ```
 
 The system is research software, not a claim to reproduce Renaissance Technologies' proprietary models and not investment advice.
+
+
+## Institutional multi-market layer
+
+The repository now includes a modular paper/practice architecture around the statistical-arbitrage core:
+
+- `multi_broker.py` — Alpaca PAPER, OANDA practice, IBKR paper, and IBKR futures-paper adapters.
+- `cross_asset_risk.py` — synchronized UTC decision grids, asset-class margin rules, risk contributions, class risk budgets, and a dollar/beta-neutral risk-budget projection.
+- `institutional_platform.py` — applies the cross-asset risk-budget and margin overlays to the core walk-forward engine and recomputes strategy PnL/costs.
+- `ai_engine.py` — Isolation Forest anomaly detection, nonlinear risk forecasting, confidence scoring, and human-readable signal explanations.
+- `streamlit_app.py` — interactive UI for portfolios, backtests, AI insights, margin/risk diagnostics, and broker configuration.
+
+### UI
+
+```bash
+pip install -r requirements-quant.txt
+streamlit run streamlit_app.py
+```
+
+### Broker configuration
+
+Alpaca PAPER:
+
+```bash
+export ALPACA_API_KEY="..."
+export ALPACA_SECRET_KEY="..."
+```
+
+OANDA practice:
+
+```bash
+export OANDA_ACCESS_TOKEN="..."
+export OANDA_ACCOUNT_ID="..."
+```
+
+IBKR paper / TWS or IB Gateway:
+
+```bash
+export IBKR_HOST="127.0.0.1"
+export IBKR_PORT="7497"
+export IBKR_CLIENT_ID="71"
+```
+
+Futures require explicit contract metadata, especially contract multiplier, exchange and expiry. Broker-reported margin and contract details should override the conservative local research defaults.
+
+The execution adapters are intentionally paper/practice-oriented. Real-money deployment should be separated from research and enabled only after validating broker contract mapping, trading calendars, order lifecycle, margin behavior, reconciliation, slippage and failure recovery.
