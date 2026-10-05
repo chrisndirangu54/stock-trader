@@ -46,6 +46,10 @@ class UserManagementService:
         self._require_admin(actor)
         if role not in VALID_ROLES:
             raise ValueError("Invalid role")
+        from firebase_admin import auth
+        target = auth.get_user(uid)
+        if (target.email or "").strip().lower() == PLATFORM_OWNER_EMAIL and role != "admin":
+            raise PermissionError("Platform owner cannot be demoted")
         self.db.collection("users").document(uid).set({
             "role": role,
             "updated_at": datetime.now(timezone.utc),
@@ -56,6 +60,9 @@ class UserManagementService:
     def set_disabled(self, uid: str, disabled: bool, actor: AuthUser) -> None:
         self._require_admin(actor)
         from firebase_admin import auth
+        target = auth.get_user(uid)
+        if (target.email or "").strip().lower() == PLATFORM_OWNER_EMAIL and disabled:
+            raise PermissionError("Platform owner cannot be disabled")
         auth.update_user(uid, disabled=bool(disabled))
         self.db.collection("users").document(uid).set({
             "disabled": bool(disabled),
