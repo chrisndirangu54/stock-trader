@@ -118,3 +118,106 @@ The desk now includes:
 Paper submission requires an explicit confirmation phrase in the UI. Continuous Yahoo futures remain research-only; IBKR futures execution requires a dated contract with expiry and exchange metadata.
 
 The UI intentionally does not provide unrestricted real-money execution.
+
+
+## Production security gate
+
+The dashboard is now protected by Firebase Authentication and role-based access control. The production path is fail-closed and remains unavailable unless all required controls pass.
+
+### Roles
+
+- `viewer` — read-only research access.
+- `trader` — may create trade proposals.
+- `risk_approver` — may perform stage-1 risk approval.
+- `execution_approver` — may perform stage-2 execution approval.
+- `admin` — manages users/kill switch/secrets, but approval separation is still enforced.
+
+A production ticket requires three distinct identities: proposer, risk approver and execution approver.
+
+### Firebase setup
+
+Enable Email/Password authentication in Firebase Authentication and create a Firestore database. Provide a server-side Firebase Admin credential using either:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/secure/path/service-account.json"
+```
+
+or:
+
+```bash
+export FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
+```
+
+The Streamlit sign-in flow also requires the Firebase Web API key:
+
+```bash
+export FIREBASE_WEB_API_KEY="..."
+```
+
+Deploy `firestore.rules`. Sensitive trading collections deny all browser/client access; the server-side Firebase Admin SDK performs authorized access.
+
+Bootstrap the first role after creating the Auth user:
+
+```bash
+python bootstrap_firebase.py FIREBASE_UID user@example.com admin
+```
+
+### Encrypted secrets
+
+Generate a Fernet master key once:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Store it outside Firestore and outside Git:
+
+```bash
+export QUANT_MASTER_KEY="..."
+```
+
+Broker secrets stored through the admin UI are encrypted before being written to Firestore. Only ciphertext is persisted there. For production, keep `QUANT_MASTER_KEY` in a managed cloud secret manager rather than a local `.env` file.
+
+### Mandatory production controls
+
+Before any ticket can become production-eligible, the gate checks:
+
+1. verified Firebase identity and authorized role;
+2. global kill switch is disengaged;
+3. daily account loss is above `MAX_DAILY_LOSS_PCT`;
+4. market data is within `MAX_MARKET_DATA_AGE_MIN`;
+5. local target positions reconcile with broker-reported positions;
+6. order sizes satisfy broker/equity risk limits;
+7. trade payload has completed two approval stages without mutation or expiry.
+
+Additional broker-native state is available through `account_risk()` and `open_orders()` for post-trade/order-state reconciliation.
+
+Useful settings:
+
+```bash
+export MAX_DAILY_LOSS_PCT="0.02"
+export MAX_MARKET_DATA_AGE_MIN="30"
+export MAX_ORDER_PCT_EQUITY="0.10"
+export RECON_TOLERANCE_USD="250"
+export MIN_BROKER_EQUITY="100"
+```
+
+Daily research bars intentionally fail the intraday production freshness test. A real-time broker or institutional market-data feed must replace Yahoo daily bars before a production ticket can pass.
+
+### Audit and execution ledger
+
+Security-sensitive actions are written to Firestore with timestamp, actor, role, request ID and SHA-256 payload hash. This includes:
+
+- kill-switch changes;
+- secret rotation/deletion;
+- trade proposal;
+- risk approval;
+- execution approval;
+- rejection;
+- gate evaluation;
+- daily-loss breaches;
+- execution ledger records.
+
+The admin desk exposes recent audit events, while `ExecutionLedger` stores hashed execution payload/result pairs for reconciliation.
+
+The repository still intentionally omits an unrestricted real-money submit button. Passing all controls means a ticket is **eligible**, not automatically executed.
