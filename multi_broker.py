@@ -109,9 +109,10 @@ class BrokerAdapter(ABC):
 
 class AlpacaPaperAdapter(BrokerAdapter):
     name = "alpaca-paper"
-    def __init__(self):
+    def __init__(self, key: str | None = None, secret: str | None = None):
         from alpaca.trading.client import TradingClient
-        key, secret = os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY")
+        key = key or os.getenv("ALPACA_API_KEY")
+        secret = secret or os.getenv("ALPACA_SECRET_KEY")
         if not key or not secret:
             raise RuntimeError("Set ALPACA_API_KEY and ALPACA_SECRET_KEY")
         self.client = TradingClient(key, secret, paper=True)
@@ -151,10 +152,10 @@ class AlpacaPaperAdapter(BrokerAdapter):
 
 class OandaPracticeAdapter(BrokerAdapter):
     name = "oanda-practice"
-    def __init__(self):
+    def __init__(self, token: str | None = None, account_id: str | None = None):
         import oandapyV20
-        token = os.getenv("OANDA_ACCESS_TOKEN")
-        self.account_id = os.getenv("OANDA_ACCOUNT_ID")
+        token = token or os.getenv("OANDA_ACCESS_TOKEN")
+        self.account_id = account_id or os.getenv("OANDA_ACCOUNT_ID")
         if not token or not self.account_id:
             raise RuntimeError("Set OANDA_ACCESS_TOKEN and OANDA_ACCOUNT_ID")
         self.api = oandapyV20.API(access_token=token, environment="practice")
@@ -204,12 +205,12 @@ class OandaPracticeAdapter(BrokerAdapter):
 class IBKRPaperAdapter(BrokerAdapter):
     """IBKR paper adapter for equities, FX and futures via TWS/IB Gateway."""
     name = "ibkr-paper"
-    def __init__(self):
+    def __init__(self, host: str | None = None, port: int | None = None, client_id: int | None = None):
         from ib_insync import IB
         self.ib = IB()
-        host = os.getenv("IBKR_HOST", "127.0.0.1")
-        port = int(os.getenv("IBKR_PORT", "7497"))
-        client_id = int(os.getenv("IBKR_CLIENT_ID", "71"))
+        host = host or os.getenv("IBKR_HOST", "127.0.0.1")
+        port = int(port or os.getenv("IBKR_PORT", "7497"))
+        client_id = int(client_id or os.getenv("IBKR_CLIENT_ID", "71"))
         self.ib.connect(host, port, clientId=client_id, readonly=False)
 
     def account_equity(self) -> float:
