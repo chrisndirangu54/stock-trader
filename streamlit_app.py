@@ -13,7 +13,7 @@ from ai_engine import MarketAICopilot, copilot_answer
 from cross_asset_risk import enforce_margin, portfolio_margin
 from desk_runtime import all_broker_snapshots, append_blotter, blotter_frame, positions_frame, snapshots_frame
 from desk_auth import require_authentication, auth_sidebar, secret_vault_panel, approval_panel, kill_switch_panel
-from production_controls import ProductionGate
+from production_controls import ProductionGate, AuditLogger
 from institutional_platform import latest_institutional_weights, run_institutional_backtest
 from multi_broker import AlpacaPaperAdapter, ContractSpec, IBKRPaperAdapter, OandaPracticeAdapter
 from trading_system_sota import (
@@ -426,6 +426,19 @@ with tabs[7]:
 
 with tabs[8]:
     secret_vault_panel(auth_user)
+    if auth_user.role == "admin":
+        st.divider()
+        st.markdown("##### Recent audit events")
+        try:
+            events = AuditLogger().recent(100)
+            if events:
+                audit_df = pd.DataFrame(events)
+                cols = [c for c in ["timestamp","actor_email","actor_role","action","severity","request_id","payload_hash"] if c in audit_df.columns]
+                st.dataframe(audit_df[cols], use_container_width=True, height=320)
+            else:
+                st.caption("No audit events yet.")
+        except Exception as e:
+            st.error(f"Audit log unavailable: {e}")
     st.divider()
     st.markdown("##### Security posture")
     st.write(
