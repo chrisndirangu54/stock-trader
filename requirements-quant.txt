@@ -11,3 +11,5 @@ ib_insync
 firebase-admin
 cryptography
 requests
+fastapi
+uvicorn[standard]
