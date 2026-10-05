@@ -221,3 +221,125 @@ Security-sensitive actions are written to Firestore with timestamp, actor, role,
 The admin desk exposes recent audit events, while `ExecutionLedger` stores hashed execution payload/result pairs for reconciliation.
 
 The repository still intentionally omits an unrestricted real-money submit button. Passing all controls means a ticket is **eligible**, not automatically executed.
+
+
+## React web investor portal
+
+The project now has a dedicated React/Vite investor portal in `web/` and a FastAPI backend in `web_api.py`.
+
+### Web architecture
+
+```text
+Firebase Authentication
+        │
+        ▼
+React / Vite investor portal
+        │  Firebase ID token
+        ▼
+FastAPI /api
+        │
+        ├── investor accounts / KYC
+        ├── subscriptions / redemptions
+        ├── units / NAV / statements
+        ├── admin user management
+        ├── audit / approvals / risk controls
+        └── quant platform integration
+        │
+        ▼
+Firebase Admin SDK + Firestore
+```
+
+The investor-facing product is intentionally modeled as an MMF/asset-management style account system—units, NAV, subscriptions, redemptions, statements, beneficiaries and KYC workflows—but this software does **not** by itself make the trading strategy or business a licensed money-market fund.
+
+### Investor portal features
+
+- Firebase email/password login;
+- separate `investor` and internal staff roles;
+- investor onboarding and account creation;
+- KYC/account-status visibility;
+- unit balance, latest NAV, portfolio value, net contributions and gain/loss;
+- subscription funding requests;
+- redemption requests;
+- account transaction history and printable statements;
+- responsive desktop/mobile institutional UI.
+
+Subscriptions are fail-safe: a client payment reference creates only a **pending subscription request**. Units are posted only after an authorized operations user confirms cleared cash. The posted subscription is repriced at the current published NAV at approval time.
+
+### Fund operations console
+
+Admin users get additional React operations tabs for:
+
+- user creation, disable/enable and role management;
+- investor/KYC queue;
+- pending subscription cash-verification queue;
+- pending redemption approval queue;
+- NAV publication and NAV history.
+
+Internal roles are:
+
+```text
+investor
+viewer
+trader
+risk_approver
+execution_approver
+admin
+```
+
+### Local development
+
+Backend:
+
+```bash
+pip install -r requirements-quant.txt
+uvicorn web_api:app --reload --port 8000
+```
+
+Frontend:
+
+```bash
+cd web
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Vite proxies `/api` to `http://localhost:8000` during development.
+
+### Firebase Hosting + Cloud Run deployment
+
+The repository includes:
+
+- `Dockerfile.web-api` for the FastAPI service;
+- `firebase.json` for Hosting and the `/api/**` Cloud Run rewrite;
+- `firestore.rules`;
+- `firestore.indexes.json`;
+- `web/.env.example`.
+
+Build and deploy the API to a Cloud Run service named `quant-fund-api` in `us-central1`, or update `firebase.json` to match your chosen service/region.
+
+Example:
+
+```bash
+gcloud builds submit --tag gcr.io/PROJECT_ID/quant-fund-api -f Dockerfile.web-api .
+gcloud run deploy quant-fund-api \
+  --image gcr.io/PROJECT_ID/quant-fund-api \
+  --region us-central1
+```
+
+Build the React app and deploy Firebase Hosting/Firestore configuration:
+
+```bash
+cd web
+npm install
+npm run build
+cd ..
+
+firebase deploy --only hosting,firestore
+```
+
+Set the Firebase client variables from `web/.env.example` before building the frontend. Keep Firebase Admin credentials and `QUANT_MASTER_KEY` server-side only; never expose them through `VITE_*` variables.
+
+### Regulatory boundary
+
+Before offering this to real investors, connect the software to the legally required fund manager/custodian/trustee/administrator, KYC/AML process, payment settlement rails, valuation policy, disclosures and jurisdiction-specific licensing/approval requirements. The code currently provides operational controls and ledger mechanics, not regulatory authorization.
