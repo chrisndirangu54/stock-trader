@@ -1,0 +1,7 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-quant.txt /app/requirements-quant.txt
+RUN pip install --no-cache-dir -r /app/requirements-quant.txt
+COPY . /app
+EXPOSE 8080
+CMD ["uvicorn","web_api:app","--host","0.0.0.0","--port","8080"]
