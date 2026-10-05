@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from firebase_security import FirebaseAuthManager, AuthUser
 from investment_accounts import InvestorAccountService
 from production_controls import AuditLogger, KillSwitch, ApprovalWorkflow
+from user_management import UserManagementService
 
 app = FastAPI(title="Quant Fund Web API", version="1.0.0")
 
@@ -27,6 +28,7 @@ app.add_middleware(
 auth = FirebaseAuthManager()
 accounts = InvestorAccountService()
 audit = AuditLogger()
+users = UserManagementService(audit)
 
 
 def current_user(authorization: Optional[str] = Header(default=None)) -> AuthUser:
@@ -60,6 +62,21 @@ class RedemptionRequest(BaseModel):
 class KycUpdate(BaseModel):
     status: str
     note: str = ""
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    role: str = "investor"
+    display_name: str = ""
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+
+class UserDisabledUpdate(BaseModel):
+    disabled: bool
 
 
 class NavPublish(BaseModel):
@@ -173,3 +190,38 @@ def approval(request_id: str, user: AuthUser = Depends(current_user)):
     if user.role not in {"admin", "risk_approver", "execution_approver", "trader"}:
         raise HTTPException(403, "Approval role required")
     return ApprovalWorkflow().get(request_id)
+
+
+@app.get("/api/admin/users")
+def list_users(user: AuthUser = Depends(current_user)):
+    try:
+        return users.list_users(user)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@app.post("/api/admin/users")
+def create_user(body: UserCreate, user: AuthUser = Depends(current_user)):
+    try:
+        uid = users.create_user(body.email, body.password, body.role, user, body.display_name)
+        return {"uid": uid}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@app.patch("/api/admin/users/{uid}/role")
+def update_role(uid: str, body: UserRoleUpdate, user: AuthUser = Depends(current_user)):
+    try:
+        users.set_role(uid, body.role, user)
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@app.patch("/api/admin/users/{uid}/disabled")
+def update_disabled(uid: str, body: UserDisabledUpdate, user: AuthUser = Depends(current_user)):
+    try:
+        users.set_disabled(uid, body.disabled, user)
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
