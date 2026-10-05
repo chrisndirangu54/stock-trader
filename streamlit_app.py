@@ -12,6 +12,8 @@ import streamlit as st
 from ai_engine import MarketAICopilot, copilot_answer
 from cross_asset_risk import enforce_margin, portfolio_margin
 from desk_runtime import all_broker_snapshots, append_blotter, blotter_frame, positions_frame, snapshots_frame
+from desk_auth import require_authentication, auth_sidebar, secret_vault_panel, approval_panel, kill_switch_panel
+from production_controls import ProductionGate
 from institutional_platform import latest_institutional_weights, run_institutional_backtest
 from multi_broker import AlpacaPaperAdapter, ContractSpec, IBKRPaperAdapter, OandaPracticeAdapter
 from trading_system_sota import (
@@ -20,6 +22,8 @@ from trading_system_sota import (
 )
 
 st.set_page_config(page_title="Quant Desk", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
+auth_user = require_authentication()
+auth_sidebar(auth_user)
 
 st.markdown(
     """
@@ -46,7 +50,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-for key, default in (("analysis", None), ("order_blotter", []), ("chat", [])):
+for key, default in (("analysis", None), ("order_blotter", []), ("chat", []), ("production_ticket", None)):
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -114,7 +118,7 @@ fig_tape.update_layout(
 )
 st.plotly_chart(fig_tape, use_container_width=True)
 
-tabs = st.tabs(["OVERVIEW", "ASSET CLASSES", "RISK", "POSITIONS + P&L", "ORDER BLOTTER", "BROKERS", "AI COPILOT"])
+tabs = st.tabs(["OVERVIEW", "ASSET CLASSES", "RISK", "POSITIONS + P&L", "ORDER BLOTTER", "BROKERS", "AI COPILOT", "PRODUCTION GATE", "SECRETS"])
 
 with tabs[0]:
     a, b = st.columns([1.35, 1])
@@ -282,7 +286,14 @@ with tabs[4]:
                     specs[bs] = spec
                 orders = adapter.rebalance(mapped_weights, mapped_prices, specs, execute=execute_paper)
                 append_blotter(st.session_state, orders)
-                st.success(f"{len(orders)} paper/practice order actions generated.")
+                st.session_state.production_ticket = {
+                    "broker": broker_choice,
+                    "orders": orders,
+                    "prices": mapped_prices,
+                    "asset_classes": {k: specs[k].asset_class for k in specs},
+                    "expected_qty": {o["symbol"]: float(o.get("target_qty", 0.0)) for o in orders},
+                }
+                st.success(f"{len(orders)} paper/practice order actions generated and staged for approval.")
                 st.dataframe(pd.DataFrame(orders), use_container_width=True)
             except Exception as e:
                 st.error(f"Paper rebalance failed safely: {e}")
@@ -357,7 +368,74 @@ with tabs[6]:
             st.session_state.chat.append({"role": "assistant", "content": answer})
             st.rerun()
 
+
+
+with tabs[7]:
+    st.markdown("##### Production readiness")
+    st.caption(
+        "This panel does not expose unrestricted real-money execution. It proves whether a staged ticket "
+        "would satisfy the production gate. Every control is fail-closed."
+    )
+    kill_switch_panel(auth_user)
+    ticket = st.session_state.get("production_ticket")
+    if not ticket:
+        st.info("Generate a rebalance ticket in ORDER BLOTTER first.")
+    else:
+        st.write(f"Staged broker: **{ticket['broker']}**")
+        st.dataframe(pd.DataFrame(ticket["orders"]), use_container_width=True)
+        approval_panel(auth_user, ticket["orders"], ticket["broker"])
+
+        approval_id = st.session_state.get("approval_request_id", "")
+        if approval_id and st.button("EVALUATE PRODUCTION GATE", type="primary"):
+            try:
+                snaps = all_broker_snapshots()
+                snap = next((x for x in snaps if x.broker == ticket["broker"]), None)
+                if snap is None or not snap.connected:
+                    raise RuntimeError("Selected broker is not connected")
+                # Yahoo daily bars intentionally fail the intraday freshness test; a production market-data
+                # feed must replace them before live-money enablement.
+                ts_map = {}
+                class_map = {}
+                for original in cfg.tickers:
+                    cls = asset_classes[original]
+                    # map known broker symbol if present, otherwise retain original
+                    broker_symbol = next((o["symbol"] for o in ticket["orders"] if o["symbol"].replace("/", "") in original.replace("-USD","").replace("=X","").replace("/","")), original)
+                    ts_map[broker_symbol] = close[original].index[-1]
+                    class_map[broker_symbol] = cls
+                gate = ProductionGate()
+                results = gate.evaluate(
+                    actor=auth_user,
+                    broker_name=ticket["broker"],
+                    broker_equity=float(snap.equity or 0.0),
+                    orders=ticket["orders"],
+                    prices=ticket["prices"],
+                    market_timestamps={k: ts_map.get(k, close.index[-1]) for k in ticket["prices"]},
+                    asset_classes={k: ticket["asset_classes"].get(k, class_map.get(k, "equity")) for k in ticket["prices"]},
+                    expected_qty=ticket["expected_qty"],
+                    broker_qty=snap.positions,
+                    approval_request_id=approval_id,
+                )
+                gate_df = pd.DataFrame([{"control": r.name, "passed": r.passed, "detail": r.detail} for r in results])
+                st.dataframe(gate_df, use_container_width=True)
+                if gate.all_pass(results):
+                    st.success("All production gates pass. The repository still has no unrestricted real-money submit button.")
+                else:
+                    st.error("Production blocked. One or more controls failed.")
+            except Exception as e:
+                st.error(f"Production gate failed closed: {e}")
+
+with tabs[8]:
+    secret_vault_panel(auth_user)
+    st.divider()
+    st.markdown("##### Security posture")
+    st.write(
+        "Broker secrets are encrypted with Fernet before Firestore storage. The QUANT_MASTER_KEY must be "
+        "kept outside Firestore (for example in a cloud secret manager or deployment environment). "
+        "Admins can rotate secrets; non-admin users cannot retrieve plaintext through the UI."
+    )
+
 st.caption(
     "Research software. Performance is historical/out-of-sample backtest output, not a guarantee. "
-    "Paper/practice broker controls are isolated from unrestricted live-money execution."
+    "Production eligibility is fail-closed behind Firebase identity, RBAC, audit, kill switch, "
+    "daily loss, stale-data, reconciliation, broker-risk and multi-person approval gates."
 )
