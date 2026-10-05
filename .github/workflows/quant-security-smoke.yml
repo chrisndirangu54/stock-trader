@@ -1,4 +1,4 @@
-name: Quant Security Smoke Test
+name: Quant Platform CI
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  smoke:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,8 +17,23 @@ jobs:
       - name: Install smoke-test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests cryptography firebase-admin
+          pip install pandas requests cryptography firebase-admin fastapi uvicorn
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Run security self-test
         run: python security_selftest.py
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install web dependencies
+        run: npm install
+      - name: Build React portal
+        run: npm run build
