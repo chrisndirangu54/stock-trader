@@ -225,3 +225,21 @@ def update_disabled(uid: str, body: UserDisabledUpdate, user: AuthUser = Depends
         return {"ok": True}
     except PermissionError as e:
         raise HTTPException(403, str(e))
+
+
+@app.get("/api/fund/nav")
+def current_nav(user: AuthUser = Depends(current_user)):
+    return accounts.nav_snapshot()
+
+
+@app.get("/api/fund/nav/history")
+def nav_history(user: AuthUser = Depends(current_user)):
+    return accounts.nav_history()
+
+
+@app.get("/api/admin/redemptions")
+def pending_redemptions(user: AuthUser = Depends(current_user)):
+    try:
+        return accounts.pending_redemptions(user)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
