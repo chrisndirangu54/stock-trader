@@ -4,3 +4,4 @@ scipy
 scikit-learn
 yfinance
 alpaca-py
+streamlit\noandapyV20\nib_insync\n
