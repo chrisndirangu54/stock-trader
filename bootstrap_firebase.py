@@ -12,7 +12,7 @@ import sys
 
 from firebase_security import bootstrap_user
 
-VALID = {"viewer", "trader", "risk_approver", "execution_approver", "admin"}
+VALID = {"viewer", "investor", "trader", "risk_approver", "execution_approver", "admin"}
 
 def main():
     if len(sys.argv) != 4:
