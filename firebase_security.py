@@ -72,11 +72,11 @@ class FirebaseAuthManager:
 
     def __init__(self):
         self.web_api_key = os.getenv("FIREBASE_WEB_API_KEY")
-        if not self.web_api_key:
-            raise RuntimeError("Set FIREBASE_WEB_API_KEY")
         _init_firebase()
 
     def sign_in(self, email: str, password: str) -> Dict[str, Any]:
+        if not self.web_api_key:
+            raise RuntimeError("Set FIREBASE_WEB_API_KEY for server-side email/password sign-in")
         url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
         r = requests.post(
             url,
