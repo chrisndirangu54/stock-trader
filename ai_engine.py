@@ -78,3 +78,54 @@ class MarketAICopilot:
             nxt = float(m.predict(df.iloc[[-1]])[0])
             out[c] = {"predicted_abs_return": nxt, "oos_rmse": rmse}
         return out
+
+
+def copilot_answer(question: str, *, metrics: dict, weights: pd.Series,
+                   features_today: pd.DataFrame, regime: str,
+                   risk_forecast: Dict[str, dict] | None = None) -> str:
+    """Grounded local copilot for the dashboard; answers only from loaded research state."""
+    q = (question or "").strip().lower()
+    risk_forecast = risk_forecast or {}
+    top_long = weights.sort_values(ascending=False).head(3)
+    top_short = weights.sort_values().head(3)
+    gross = float(weights.abs().sum())
+    net = float(weights.sum())
+
+    if any(k in q for k in ("risk", "danger", "drawdown", "volatile", "volatility")):
+        risky = sorted(
+            ((s, d.get("predicted_abs_return")) for s, d in risk_forecast.items()
+             if d.get("predicted_abs_return") is not None),
+            key=lambda x: x[1], reverse=True
+        )[:5]
+        tail = ", ".join(f"{s} {v:.2%}" for s, v in risky) if risky else "no forecast available"
+        return (
+            f"Current research regime is {regime}. Portfolio gross exposure is {gross:.2f}x and "
+            f"net exposure is {net:+.3f}. Backtest max drawdown is {metrics.get('max_dd', float('nan')):.1%}, "
+            f"with annualized volatility {metrics.get('vol', float('nan')):.1%}. "
+            f"Highest predicted next-period absolute moves: {tail}."
+        )
+
+    if any(k in q for k in ("long", "buy", "bull")):
+        txt = ", ".join(f"{s} {w:+.2%}" for s, w in top_long.items())
+        return f"Largest positive target weights are {txt}. These are model targets, not discretionary buy recommendations."
+
+    if any(k in q for k in ("short", "sell", "bear")):
+        txt = ", ".join(f"{s} {w:+.2%}" for s, w in top_short.items())
+        return f"Largest negative target weights are {txt}. These are model targets inside a hedged portfolio."
+
+    if any(k in q for k in ("why", "driver", "explain", "signal")):
+        symbol = next((s for s in weights.index if s.lower() in q), weights.abs().idxmax())
+        row = features_today.loc[symbol].abs().sort_values(ascending=False).head(5)
+        drivers = ", ".join(f"{k}={features_today.loc[symbol, k]:+.2f}" for k in row.index)
+        return (
+            f"{symbol} has target weight {weights.get(symbol, 0.0):+.2%} in a {regime} regime. "
+            f"Its strongest standardized inputs today are {drivers}. "
+            "The production signal remains the statistical ensemble and optimizer; this explanation layer does not override it."
+        )
+
+    return (
+        f"Desk summary: regime={regime}; Sharpe={metrics.get('sharpe', float('nan')):.2f}; "
+        f"CAGR={metrics.get('cagr', float('nan')):.1%}; volatility={metrics.get('vol', float('nan')):.1%}; "
+        f"max drawdown={metrics.get('max_dd', float('nan')):.1%}; gross={gross:.2f}x; net={net:+.3f}. "
+        "Ask about risk, the largest longs/shorts, or why a specific symbol has its current weight."
+    )
