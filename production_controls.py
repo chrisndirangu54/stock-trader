@@ -45,6 +45,17 @@ class AuditLogger:
     def __init__(self):
         self.db = firestore_client()
 
+    def recent(self, limit: int = 100) -> list[dict]:
+        docs = (self.db.collection(self.COLLECTION)
+                .order_by("timestamp", direction="DESCENDING")
+                .limit(limit).stream())
+        out = []
+        for d in docs:
+            row = d.to_dict()
+            row["id"] = d.id
+            out.append(row)
+        return out
+
     def log(self, actor: AuthUser | None, action: str, payload: dict,
             severity: str = "info", request_id: str | None = None) -> str:
         doc = self.db.collection(self.COLLECTION).document()
@@ -179,6 +190,67 @@ class ReconciliationEngine:
             len(mismatches) == 0,
             "matched" if not mismatches else "mismatch " + ", ".join(mismatches[:8]),
         )
+
+
+class OrderStateReconciler:
+    """Reconcile locally-recorded broker order IDs against broker-native open-order state."""
+
+    def reconcile(self, local_orders: list[dict], broker_orders: list[dict]) -> GateResult:
+        local = {str(o.get("order_id")): o for o in local_orders if o.get("order_id")}
+        remote = {str(o.get("order_id")): o for o in broker_orders if o.get("order_id")}
+        problems = []
+        for oid, lo in local.items():
+            ro = remote.get(oid)
+            if ro is None and str(lo.get("status", "")).lower() in {"open", "pending", "submitted"}:
+                problems.append(f"{oid}:missing-at-broker")
+            elif ro is not None:
+                ls = str(lo.get("symbol", ""))
+                rs = str(ro.get("symbol", ""))
+                if ls and rs and ls.replace("/", "") != rs.replace("/", ""):
+                    problems.append(f"{oid}:symbol-mismatch")
+        return GateResult(
+            "order_state_reconciliation",
+            len(problems) == 0,
+            "orders reconciled" if not problems else ", ".join(problems[:8]),
+        )
+
+class ExecutionLedger:
+    COLLECTION = "execution_ledger"
+
+    def __init__(self, audit: AuditLogger | None = None):
+        self.db = firestore_client()
+        self.audit = audit or AuditLogger()
+
+    def record(self, request_id: str, actor: AuthUser, broker: str,
+               orders: list[dict], broker_result: list[dict]) -> str:
+        doc = self.db.collection(self.COLLECTION).document()
+        payload = {
+            "request_id": request_id,
+            "broker": broker,
+            "orders": orders,
+            "orders_hash": sha256_payload(orders),
+            "broker_result": broker_result,
+            "broker_result_hash": sha256_payload(broker_result),
+            "actor_uid": actor.uid,
+            "created_at": utcnow(),
+        }
+        doc.set(payload)
+        self.audit.log(actor, "execution_ledger_recorded",
+                       {"ledger_id": doc.id, "request_id": request_id, "broker": broker},
+                       request_id=request_id)
+        return doc.id
+
+    def recent(self, broker: str | None = None, limit: int = 100) -> list[dict]:
+        q = self.db.collection(self.COLLECTION)
+        if broker:
+            q = q.where("broker", "==", broker)
+        q = q.order_by("created_at", direction="DESCENDING").limit(limit)
+        rows = []
+        for d in q.stream():
+            row = d.to_dict()
+            row["id"] = d.id
+            rows.append(row)
+        return rows
 
 
 class BrokerRiskVerifier:
@@ -321,6 +393,7 @@ class ProductionGate:
         self.loss = DailyLossGuard(audit=self.audit)
         self.fresh = MarketDataGuard()
         self.recon = ReconciliationEngine()
+        self.order_recon = OrderStateReconciler()
         self.broker = BrokerRiskVerifier()
         self.approvals = ApprovalWorkflow(self.audit)
 
