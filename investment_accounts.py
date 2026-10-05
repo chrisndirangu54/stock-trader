@@ -248,6 +248,21 @@ class InvestorAccountService:
         out.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
         return out
 
+    def pending_redemptions(self, actor: AuthUser, limit: int = 200) -> list[dict]:
+        if actor.role not in {"admin", "execution_approver"}:
+            raise PermissionError("Role cannot view pending redemptions")
+        docs = (self.db.collection("investment_transactions")
+                .where("kind", "==", "redemption_request")
+                .where("status", "==", "pending")
+                .limit(limit).stream())
+        out = []
+        for d in docs:
+            row = d.to_dict()
+            row["id"] = d.id
+            out.append(row)
+        out.sort(key=lambda x: str(x.get("created_at", "")))
+        return out
+
     def statement(self, account_id: str, user: AuthUser) -> dict:
         account = self.get_account(account_id, user)
         return {
