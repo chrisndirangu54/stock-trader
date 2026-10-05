@@ -1,0 +1,93 @@
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
+import { BadgeCheck, CircleDollarSign, FileText, LayoutDashboard, LogOut, ShieldCheck, Users, WalletCards } from "lucide-react";
+import { auth } from "./firebase";
+import { api } from "./api";
+
+type Me={uid:string;email:string;role:string};
+type Account={account_id:string;uid:string;email:string;legal_name:string;phone:string;country:string;risk_profile:string;kyc_status:string;account_status:string;fund_id:string;base_currency:string};
+type Holding={account_id:string;units:string;nav:string;market_value:string;net_contributions:string;gain_loss:string};
+type Tx={transaction_id:string;kind:string;amount:string;units:string;nav:string;status:string;created_at:any};
+type AdminUser={uid:string;email:string;display_name:string;disabled:boolean;email_verified:boolean;role:string;last_sign_in_at?:number};
+
+function money(v:any,c="USD"){return new Intl.NumberFormat("en-US",{style:"currency",currency:c,maximumFractionDigits:2}).format(Number(v||0))}
+function date(v:any){if(!v)return "—";if(typeof v==="string")return new Date(v).toLocaleString();const s=v._seconds||v.seconds;return s?new Date(s*1000).toLocaleString():"—"}
+
+function Login(){
+  const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[err,setErr]=useState("");
+  async function submit(e:React.FormEvent){e.preventDefault();setErr("");try{await signInWithEmailAndPassword(auth,email,password)}catch(x){setErr(x instanceof Error?x.message:"Sign in failed")}}
+  return <div className="auth-shell"><div className="brand"><b>Q</b><div><strong>Quant Fund</strong><span>Investor portal</span></div></div>
+    <form className="login-card" onSubmit={submit}><span className="eyebrow">SECURE ACCESS</span><h1>Welcome back</h1><p>View your investment account, units, transactions and statements.</p>
+      <label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label>
+      <label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>
+      {err&&<div className="error">{err}</div>}<button className="primary">Sign in</button><small>Firebase Authentication + server-side access control.</small>
+    </form></div>
+}
+
+export default function App(){
+ const[user,setUser]=useState<User|null>(null),[ready,setReady]=useState(false),[me,setMe]=useState<Me|null>(null);
+ const[accounts,setAccounts]=useState<Account[]>([]),[account,setAccount]=useState<Account|null>(null),[holding,setHolding]=useState<Holding|null>(null),[txs,setTxs]=useState<Tx[]>([]);
+ const[page,setPage]=useState("overview"),[err,setErr]=useState("");
+ useEffect(()=>onAuthStateChanged(auth,u=>{setUser(u);setReady(true);if(!u){setMe(null);setAccounts([]);setAccount(null)}}),[]);
+ async function loadAccounts(){const a=await api<Account[]>("/api/accounts");setAccounts(a);if(!account&&a.length)setAccount(a[0])}
+ useEffect(()=>{if(!user)return;(async()=>{try{setMe(await api<Me>("/api/me"));await loadAccounts()}catch(e){setErr(String(e))}})()},[user]);
+ async function refresh(){if(!account)return;const h=await api<Holding>("/api/accounts/"+account.account_id+"/holdings");const t=await api<Tx[]>("/api/accounts/"+account.account_id+"/transactions");setHolding(h);setTxs(t)}
+ useEffect(()=>{if(account)refresh().catch(e=>setErr(String(e)))},[account]);
+ if(!ready)return <div className="loading">Loading secure portal…</div>;if(!user)return <Login/>;
+ const admin=me?.role==="admin";
+ const nav=[["overview","Overview"],["account","My account"],["cash","Add / withdraw"],["statement","Statements"],["security","Security"]].concat(admin?[["admin","Fund operations"]]:[]);
+ return <div className="shell">
+  <aside><div className="brand small"><b>Q</b><div><strong>Quant Fund</strong><span>Capital portal</span></div></div>
+   <label className="switcher">Account<select value={account?.account_id||""} onChange={e=>setAccount(accounts.find(a=>a.account_id===e.target.value)||null)}>{accounts.map(a=><option value={a.account_id} key={a.account_id}>{a.legal_name||a.account_id}</option>)}</select></label>
+   <nav>{nav.map(n=><button className={page===n[0]?"active":""} onClick={()=>setPage(n[0])} key={n[0]}>{n[0]==="overview"?<LayoutDashboard/>:n[0]==="account"?<WalletCards/>:n[0]==="cash"?<CircleDollarSign/>:n[0]==="statement"?<FileText/>:n[0]==="admin"?<Users/>:<ShieldCheck/>}<span>{n[1]}</span></button>)}</nav>
+   <div className="side-bottom"><div className="identity"><b>{me?.email}</b><span>{me?.role}</span></div><button onClick={()=>signOut(auth)}><LogOut/>Sign out</button></div>
+  </aside>
+  <main><header><div><span className="eyebrow">INVESTOR PORTAL</span><h1>{title(page)}</h1></div><div className="status"><span className={"pill "+(account?.kyc_status==="verified"?"ok":"warn")}><BadgeCheck/>{account?.kyc_status||"No account"}</span></div></header>
+   {err&&<div className="error banner">{err}</div>}
+   {!account&&<CreateAccount done={loadAccounts}/>}
+   {account&&page==="overview"&&<Overview a={account} h={holding} tx={txs}/>}
+   {account&&page==="account"&&<AccountPanel a={account} h={holding}/>}
+   {account&&page==="cash"&&<Cash a={account} h={holding} done={refresh}/>}
+   {account&&page==="statement"&&<Statement a={account} h={holding} tx={txs}/>}
+   {account&&page==="security"&&<Security a={account} me={me}/>}
+   {admin&&page==="admin"&&<Admin/>}
+  </main>
+ </div>
+}
+
+function title(p:string){return ({overview:"Portfolio overview",account:"Investment account",cash:"Add or withdraw",statement:"Statements & activity",security:"Account security",admin:"Fund operations"} as any)[p]||"Portal"}
+function Metric(p:{label:string;value:string;sub?:string}){return <div className="metric"><span>{p.label}</span><strong>{p.value}</strong>{p.sub&&<small>{p.sub}</small>}</div>}
+function Detail(p:{label:string;value:any}){return <div className="detail"><span>{p.label}</span><b>{String(p.value||"—")}</b></div>}
+
+function Overview({a,h,tx}:{a:Account;h:Holding|null;tx:Tx[]}){
+ return <><section className="metrics"><Metric label="Portfolio value" value={money(h?.market_value,a.base_currency)}/><Metric label="Units held" value={Number(h?.units||0).toLocaleString()}/><Metric label="NAV / unit" value={money(h?.nav,a.base_currency)}/><Metric label="Gain / loss" value={money(h?.gain_loss,a.base_currency)}/></section>
+ <section className="grid2"><div className="panel hero"><span className="eyebrow">ACCOUNT VALUE</span><h2>{money(h?.market_value,a.base_currency)}</h2><p>Your balance is represented by units multiplied by the latest published NAV.</p><div className="bars">{[42,52,48,66,63,72,78,83,91,88,96,100].map((v,i)=><i key={i} style={{height:v+"%"}}/>)}</div></div>
+ <div className="panel"><span className="eyebrow">ACCOUNT STATUS</span><h2>Investor profile</h2><Detail label="Legal name" value={a.legal_name}/><Detail label="KYC" value={a.kyc_status}/><Detail label="Status" value={a.account_status}/><Detail label="Risk profile" value={a.risk_profile}/><Detail label="Fund" value={a.fund_id}/></div></section>
+ <div className="panel"><div className="panel-head"><div><span className="eyebrow">RECENT ACTIVITY</span><h2>Transactions</h2></div></div><TxTable rows={tx.slice(0,8)} currency={a.base_currency}/></div></>
+}
+
+function AccountPanel({a,h}:{a:Account;h:Holding|null}){return <section className="grid2"><div className="panel"><span className="eyebrow">HOLDINGS</span><h2>Unit account</h2><div className="big">{money(h?.market_value,a.base_currency)}</div><Detail label="Units" value={h?.units}/><Detail label="NAV" value={money(h?.nav,a.base_currency)}/><Detail label="Net contributions" value={money(h?.net_contributions,a.base_currency)}/><Detail label="Gain / loss" value={money(h?.gain_loss,a.base_currency)}/></div><div className="panel"><span className="eyebrow">PROFILE</span><h2>Registered details</h2><Detail label="Name" value={a.legal_name}/><Detail label="Email" value={a.email}/><Detail label="Phone" value={a.phone}/><Detail label="Country" value={a.country}/><Detail label="KYC status" value={a.kyc_status}/></div></section>}
+
+function Cash({a,h,done}:{a:Account;h:Holding|null;done:()=>Promise<void>}){
+ const[mode,setMode]=useState("add"),[amount,setAmount]=useState(""),[ref,setRef]=useState(""),[msg,setMsg]=useState("");
+ async function submit(e:React.FormEvent){e.preventDefault();try{const path=mode==="add"?"/api/subscriptions":"/api/redemptions";await api(path,{method:"POST",body:JSON.stringify({account_id:a.account_id,amount:Number(amount),external_ref:ref})});setMsg(mode==="add"?"Subscription posted.":"Redemption request submitted.");setAmount("");await done()}catch(x){setMsg(String(x))}}
+ return <section className="grid2"><form className="panel" onSubmit={submit}><div className="segments"><button type="button" className={mode==="add"?"on":""} onClick={()=>setMode("add")}>Add funds</button><button type="button" className={mode==="withdraw"?"on":""} onClick={()=>setMode("withdraw")}>Withdraw</button></div><span className="eyebrow">{mode==="add"?"SUBSCRIPTION":"REDEMPTION"}</span><h2>{mode==="add"?"Purchase units":"Request withdrawal"}</h2><label>Amount ({a.base_currency})<input type="number" min="0" step=".01" value={amount} onChange={e=>setAmount(e.target.value)} required/></label>{mode==="add"&&<label>Payment reference<input value={ref} onChange={e=>setRef(e.target.value)}/></label>}<button className="primary" disabled={a.kyc_status!=="verified"}>{mode==="add"?"Add funds":"Request withdrawal"}</button>{a.kyc_status!=="verified"&&<div className="notice">KYC verification is required.</div>}{msg&&<div className="notice">{msg}</div>}</form><div className="panel"><span className="eyebrow">AVAILABLE</span><h2>Account liquidity</h2><div className="big">{money(h?.market_value,a.base_currency)}</div><Detail label="Units" value={h?.units}/><Detail label="NAV" value={money(h?.nav,a.base_currency)}/><p className="muted">Settlement, cut-off times and fees should be configured to match the licensed product before launch.</p></div></section>
+}
+
+function Statement({a,h,tx}:{a:Account;h:Holding|null;tx:Tx[]}){return <><section className="metrics compact"><Metric label="Statement value" value={money(h?.market_value,a.base_currency)}/><Metric label="Units" value={h?.units||"0"}/><Metric label="NAV" value={money(h?.nav,a.base_currency)}/><Metric label="Transactions" value={String(tx.length)}/></section><div className="panel"><div className="panel-head"><div><span className="eyebrow">LEDGER</span><h2>Account statement</h2></div><button onClick={()=>window.print()}>Print / save PDF</button></div><TxTable rows={tx} currency={a.base_currency}/></div></>}
+
+function Security({a,me}:{a:Account;me:Me|null}){return <section className="grid2"><div className="panel"><span className="eyebrow">IDENTITY</span><h2>Account protection</h2><Detail label="Firebase UID" value={me?.uid}/><Detail label="Role" value={me?.role}/><Detail label="KYC" value={a.kyc_status}/><Detail label="Account state" value={a.account_status}/><div className="secure"><ShieldCheck/><div><b>Server-authorized access</b><span>Ownership and role checks are enforced by the API.</span></div></div></div><div className="panel"><span className="eyebrow">CONTROLS</span><h2>Operational safeguards</h2><Detail label="Subscriptions" value="KYC gated"/><Detail label="Redemptions" value="Approval workflow"/><Detail label="Audit" value="Hashed event trail"/><Detail label="Trading" value="Separate production risk gate"/></div></section>}
+
+function TxTable({rows,currency}:{rows:Tx[];currency:string}){if(!rows.length)return <div className="empty">No transactions yet.</div>;return <div className="tablewrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Units</th><th>NAV</th><th>Status</th></tr></thead><tbody>{rows.map((t,i)=><tr key={t.transaction_id||i}><td>{date(t.created_at)}</td><td>{t.kind.split("_").join(" ")}</td><td>{money(t.amount,currency)}</td><td>{Number(t.units).toLocaleString()}</td><td>{money(t.nav,currency)}</td><td><span className={"pill "+(t.status==="posted"?"ok":"warn")}>{t.status}</span></td></tr>)}</tbody></table></div>}
+
+function CreateAccount({done}:{done:()=>Promise<void>}){const[name,setName]=useState(""),[country,setCountry]=useState(""),[phone,setPhone]=useState("");async function submit(e:React.FormEvent){e.preventDefault();await api("/api/accounts",{method:"POST",body:JSON.stringify({legal_name:name,country,phone,risk_profile:"moderate"})});await done()}return <form className="panel narrow" onSubmit={submit}><span className="eyebrow">ONBOARDING</span><h2>Create investment account</h2><p>The account starts pending KYC.</p><label>Legal name<input value={name} onChange={e=>setName(e.target.value)} required/></label><label>Phone<input value={phone} onChange={e=>setPhone(e.target.value)}/></label><label>Country<input value={country} onChange={e=>setCountry(e.target.value)}/></label><button className="primary">Create account</button></form>}
+
+function Admin(){
+ const[users,setUsers]=useState<AdminUser[]>([]),[show,setShow]=useState(false),[email,setEmail]=useState(""),[password,setPassword]=useState(""),[role,setRole]=useState("investor"),[name,setName]=useState("");
+ async function load(){setUsers(await api<AdminUser[]>("/api/admin/users"))}useEffect(()=>{load()},[]);
+ async function changeRole(uid:string,r:string){await api("/api/admin/users/"+uid+"/role",{method:"PATCH",body:JSON.stringify({role:r})});await load()}
+ async function toggle(uid:string,d:boolean){await api("/api/admin/users/"+uid+"/disabled",{method:"PATCH",body:JSON.stringify({disabled:d})});await load()}
+ async function create(e:React.FormEvent){e.preventDefault();await api("/api/admin/users",{method:"POST",body:JSON.stringify({email,password,role,display_name:name})});setShow(false);setEmail("");setPassword("");await load()}
+ return <><div className="adminbar"><div><span className="eyebrow">FUND OPERATIONS</span><h2>User management</h2></div><button className="primary" onClick={()=>setShow(!show)}>+ Add user</button></div>{show&&<form className="panel formrow" onSubmit={create}><input placeholder="Display name" value={name} onChange={e=>setName(e.target.value)}/><input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required/><input type="password" minLength={8} placeholder="Temporary password" value={password} onChange={e=>setPassword(e.target.value)} required/><select value={role} onChange={e=>setRole(e.target.value)}>{roles().map(x=><option key={x}>{x}</option>)}</select><button className="primary">Create</button></form>}<div className="panel"><div className="tablewrap"><table><thead><tr><th>User</th><th>Role</th><th>Verified</th><th>Status</th><th>Last sign in</th><th></th></tr></thead><tbody>{users.map(u=><tr key={u.uid}><td><b>{u.display_name||u.email}</b><small>{u.email}</small></td><td><select value={u.role} onChange={e=>changeRole(u.uid,e.target.value)}>{roles().map(x=><option key={x}>{x}</option>)}</select></td><td>{u.email_verified?"Yes":"No"}</td><td><span className={"pill "+(u.disabled?"danger":"ok")}>{u.disabled?"Disabled":"Active"}</span></td><td>{u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString():"—"}</td><td><button onClick={()=>toggle(u.uid,!u.disabled)}>{u.disabled?"Enable":"Disable"}</button></td></tr>)}</tbody></table></div></div></>
+}
+function roles(){return["investor","viewer","trader","risk_approver","execution_approver","admin"]}
