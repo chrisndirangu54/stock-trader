@@ -4,4 +4,7 @@ scipy
 scikit-learn
 yfinance
 alpaca-py
-streamlit\noandapyV20\nib_insync\n
+streamlit>=1.37
+plotly
+oandapyV20
+ib_insync
