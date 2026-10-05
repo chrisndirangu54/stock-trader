@@ -157,9 +157,9 @@ class SecretVault:
         self.db.collection(self.COLLECTION).document(f"{scope}__{name}").delete()
 
 
-def bootstrap_user(uid: str, email: str, role: str = "viewer") -> None:
+def bootstrap_user(uid: str, email: str, role: str = "investor") -> None:
     """Admin-only helper intended for initial setup scripts, not the public UI."""
-    if role not in {"viewer", "trader", "risk_approver", "execution_approver", "admin"}:
+    if role not in {"viewer", "investor", "trader", "risk_approver", "execution_approver", "admin"}:
         raise ValueError("Invalid role")
     db = firestore_client()
     db.collection("users").document(uid).set({
