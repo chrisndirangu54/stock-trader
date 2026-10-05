@@ -124,6 +124,26 @@ class InvestorAccountService:
             raise RuntimeError("NAV not published")
         return D(str(snap.to_dict()["nav_per_unit"]))
 
+    def nav_snapshot(self) -> dict:
+        snap = self.db.collection("fund_nav").document(self.cfg.fund_id).get()
+        if not snap.exists:
+            raise RuntimeError("NAV not published")
+        data = snap.to_dict()
+        data["id"] = snap.id
+        return data
+
+    def nav_history(self, limit: int = 365) -> list[dict]:
+        docs = (self.db.collection("fund_nav_history")
+                .where("fund_id", "==", self.cfg.fund_id)
+                .limit(limit).stream())
+        out = []
+        for d in docs:
+            row = d.to_dict()
+            row["id"] = d.id
+            out.append(row)
+        out.sort(key=lambda x: str(x.get("valuation_date", "")))
+        return out
+
     def publish_nav(self, nav_per_unit: Decimal, actor: AuthUser, valuation_date: str,
                     source_equity: Decimal, notes: str = "") -> None:
         if actor.role not in {"admin", "risk_approver"}:
