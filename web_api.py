@@ -243,3 +243,20 @@ def pending_redemptions(user: AuthUser = Depends(current_user)):
         return accounts.pending_redemptions(user)
     except PermissionError as e:
         raise HTTPException(403, str(e))
+
+
+@app.get("/api/admin/subscriptions")
+def pending_subscriptions(user: AuthUser = Depends(current_user)):
+    try:
+        return accounts.pending_subscriptions(user)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@app.post("/api/admin/subscriptions/{transaction_id}/approve")
+def approve_subscription(transaction_id: str, user: AuthUser = Depends(current_user)):
+    try:
+        accounts.approve_subscription(transaction_id, user)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    return {"ok": True}
