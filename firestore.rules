@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Quant Desk uses Firebase Admin SDK server-side. Sensitive collections are never
+    // directly readable/writable from browser clients, even when authenticated.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /encrypted_secrets/{doc} {
+      allow read, write: if false;
+    }
+
+    match /trade_approvals/{doc} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{doc} {
+      allow read, write: if false;
+    }
+
+    match /execution_ledger/{doc} {
+      allow read, write: if false;
+    }
+
+    match /risk_controls/{doc} {
+      allow read, write: if false;
+    }
+
+    match /daily_risk/{doc} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
