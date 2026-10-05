@@ -56,12 +56,18 @@ export default function App(){
 }
 
 function title(p:string){return ({overview:"Portfolio overview",account:"Investment account",cash:"Add or withdraw",statement:"Statements & activity",security:"Account security",admin:"Fund operations"} as any)[p]||"Portal"}
+function FlowBars({tx}:{tx:Tx[]}){
+ const rows=[...tx].reverse().filter(t=>t.status==="posted");
+ let running=0;const vals=rows.map(t=>{const a=Number(t.amount||0);running+=t.kind==="subscription"?a:t.kind==="redemption"?-a:0;return Math.max(running,0)});
+ const max=Math.max(...vals,1);if(!vals.length)return <div className="empty">Activity appears after transactions are posted.</div>;
+ return <div className="bars">{vals.slice(-24).map((v,i)=><i key={i} title={money(v)} style={{height:Math.max(4,v/max*100)+"%"}}/>)}</div>
+}
 function Metric(p:{label:string;value:string;sub?:string}){return <div className="metric"><span>{p.label}</span><strong>{p.value}</strong>{p.sub&&<small>{p.sub}</small>}</div>}
 function Detail(p:{label:string;value:any}){return <div className="detail"><span>{p.label}</span><b>{String(p.value||"—")}</b></div>}
 
 function Overview({a,h,tx}:{a:Account;h:Holding|null;tx:Tx[]}){
  return <><section className="metrics"><Metric label="Portfolio value" value={money(h?.market_value,a.base_currency)}/><Metric label="Units held" value={Number(h?.units||0).toLocaleString()}/><Metric label="NAV / unit" value={money(h?.nav,a.base_currency)}/><Metric label="Gain / loss" value={money(h?.gain_loss,a.base_currency)}/></section>
- <section className="grid2"><div className="panel hero"><span className="eyebrow">ACCOUNT VALUE</span><h2>{money(h?.market_value,a.base_currency)}</h2><p>Your balance is represented by units multiplied by the latest published NAV.</p><div className="bars">{[42,52,48,66,63,72,78,83,91,88,96,100].map((v,i)=><i key={i} style={{height:v+"%"}}/>)}</div></div>
+ <section className="grid2"><div className="panel hero"><span className="eyebrow">ACCOUNT VALUE</span><h2>{money(h?.market_value,a.base_currency)}</h2><p>Your balance is represented by units multiplied by the latest published NAV.</p><FlowBars tx={tx}/></div>
  <div className="panel"><span className="eyebrow">ACCOUNT STATUS</span><h2>Investor profile</h2><Detail label="Legal name" value={a.legal_name}/><Detail label="KYC" value={a.kyc_status}/><Detail label="Status" value={a.account_status}/><Detail label="Risk profile" value={a.risk_profile}/><Detail label="Fund" value={a.fund_id}/></div></section>
  <div className="panel"><div className="panel-head"><div><span className="eyebrow">RECENT ACTIVITY</span><h2>Transactions</h2></div></div><TxTable rows={tx.slice(0,8)} currency={a.base_currency}/></div></>
 }
