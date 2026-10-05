@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import requests
+
+PLATFORM_OWNER_EMAIL = os.getenv("PLATFORM_OWNER_EMAIL", "chrisndirangu54@gmail.com").strip().lower()
 from cryptography.fernet import Fernet, InvalidToken
 
 _FIREBASE_APP = None
@@ -101,10 +103,19 @@ class FirebaseAuthManager:
         db = firestore_client()
         snap = db.collection("users").document(uid).get()
         profile = snap.to_dict() if snap.exists else {}
-        role = profile.get("role", "viewer")
-        disabled = bool(user_record.disabled or profile.get("disabled", False))
+        is_owner = email.strip().lower() == PLATFORM_OWNER_EMAIL
+        role = "admin" if is_owner else profile.get("role", "viewer")
+        disabled = False if is_owner else bool(user_record.disabled or profile.get("disabled", False))
         if disabled:
             raise PermissionError("User account is disabled")
+        if is_owner:
+            db.collection("users").document(uid).set({
+                "email": email,
+                "role": "admin",
+                "platform_owner": True,
+                "disabled": False,
+                "updated_at": datetime.now(timezone.utc),
+            }, merge=True)
         return AuthUser(uid=uid, email=email, role=role, disabled=False)
 
     @staticmethod
@@ -168,3 +179,25 @@ def bootstrap_user(uid: str, email: str, role: str = "investor") -> None:
         "disabled": False,
         "updated_at": datetime.now(timezone.utc),
     }, merge=True)
+
+
+def bootstrap_platform_owner(email: str = PLATFORM_OWNER_EMAIL) -> str:
+    """Promote the existing Firebase Auth user for the configured owner email.
+
+    The Auth user must already exist; this function intentionally does not invent
+    or reset an owner password.
+    """
+    _init_firebase()
+    from firebase_admin import auth
+    rec = auth.get_user_by_email(email)
+    db = firestore_client()
+    db.collection("users").document(rec.uid).set({
+        "email": rec.email,
+        "role": "admin",
+        "platform_owner": True,
+        "disabled": False,
+        "updated_at": datetime.now(timezone.utc),
+    }, merge=True)
+    if rec.disabled:
+        auth.update_user(rec.uid, disabled=False)
+    return rec.uid
