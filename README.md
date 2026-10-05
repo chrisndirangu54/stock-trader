@@ -92,3 +92,29 @@ export IBKR_CLIENT_ID="71"
 Futures require explicit contract metadata, especially contract multiplier, exchange and expiry. Broker-reported margin and contract details should override the conservative local research defaults.
 
 The execution adapters are intentionally paper/practice-oriented. Real-money deployment should be separated from research and enabled only after validating broker contract mapping, trading calendars, order lifecycle, margin behavior, reconciliation, slippage and failure recovery.
+
+
+## Quant desk dashboard
+
+Launch the professional Streamlit desk:
+
+```bash
+pip install -r requirements-quant.txt
+streamlit run streamlit_app.py
+```
+
+The desk now includes:
+
+- normalized live market tape for the loaded universe;
+- strategy equity, cumulative P&L, turnover and modeled trading costs;
+- target book with margin-safe weights and current risk statistics;
+- asset-class workspaces for equities, crypto, FX and futures research;
+- 126-day correlation heatmap and rolling volatility/drawdown panels;
+- connected paper/practice broker status and positions;
+- session order blotter;
+- paper/practice rebalance preview and guarded submission controls;
+- AI anomaly monitor, nonlinear risk forecast and grounded copilot chat.
+
+Paper submission requires an explicit confirmation phrase in the UI. Continuous Yahoo futures remain research-only; IBKR futures execution requires a dated contract with expiry and exchange metadata.
+
+The UI intentionally does not provide unrestricted real-money execution.
