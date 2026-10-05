@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from firebase_security import AuthUser, firestore_client, _init_firebase
+from firebase_security import AuthUser, firestore_client, _init_firebase, PLATFORM_OWNER_EMAIL
 from production_controls import AuditLogger
 
 
@@ -28,13 +28,15 @@ class UserManagementService:
         for u in auth.list_users(max_results=min(limit, 1000)).iterate_all():
             snap = self.db.collection("users").document(u.uid).get()
             profile = snap.to_dict() if snap.exists else {}
+            is_owner = (u.email or "").strip().lower() == PLATFORM_OWNER_EMAIL
             rows.append({
                 "uid": u.uid,
                 "email": u.email or "",
                 "display_name": u.display_name or "",
                 "disabled": bool(u.disabled),
                 "email_verified": bool(u.email_verified),
-                "role": profile.get("role", "investor"),
+                "role": "admin" if is_owner else profile.get("role", "investor"),
+                "platform_owner": is_owner,
                 "created_at": u.user_metadata.creation_timestamp,
                 "last_sign_in_at": u.user_metadata.last_sign_in_timestamp,
             })
