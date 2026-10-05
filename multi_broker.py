@@ -79,6 +79,9 @@ class BrokerAdapter(ABC):
     def submit_market_order(self, symbol: str, qty: float, side: str,
                             spec: ContractSpec) -> dict: ...
 
+    def position_details(self) -> list[dict]:
+        return [{"symbol": k, "qty": v} for k, v in self.positions().items()]
+
     def rebalance(self, weights: Dict[str, float], prices: Dict[str, float],
                   specs: Dict[str, ContractSpec], execute: bool = False) -> list[dict]:
         equity = self.account_equity()
@@ -90,7 +93,7 @@ class BrokerAdapter(ABC):
             target = target_quantity(equity, float(weight), px, spec)
             if weight < 0:
                 target *= -1
-            current = float(held.get(symbol, 0.0))
+            current = float(held.get(symbol, held.get(symbol.replace("/", ""), 0.0)))
             delta = target - current
             if abs(delta) < spec.min_qty:
                 continue
@@ -117,7 +120,23 @@ class AlpacaPaperAdapter(BrokerAdapter):
         return float(self.client.get_account().equity)
 
     def positions(self) -> Dict[str, float]:
-        return {p.symbol.replace("/", ""): float(p.qty) for p in self.client.get_all_positions()}
+        out = {}
+        for p in self.client.get_all_positions():
+            out[p.symbol] = float(p.qty)
+            out[p.symbol.replace("/", "")] = float(p.qty)
+        return out
+
+    def position_details(self) -> list[dict]:
+        rows = []
+        for p in self.client.get_all_positions():
+            rows.append({
+                "symbol": p.symbol, "qty": float(p.qty),
+                "market_value": float(getattr(p, "market_value", 0) or 0),
+                "avg_entry_price": float(getattr(p, "avg_entry_price", 0) or 0),
+                "unrealized_pnl": float(getattr(p, "unrealized_pl", 0) or 0),
+                "unrealized_pnl_pct": float(getattr(p, "unrealized_plpc", 0) or 0),
+            })
+        return rows
 
     def submit_market_order(self, symbol: str, qty: float, side: str, spec: ContractSpec) -> dict:
         from alpaca.trading.enums import OrderSide, TimeInForce
@@ -155,6 +174,22 @@ class OandaPracticeAdapter(BrokerAdapter):
             out[p["instrument"]] = float(p["long"]["units"]) + float(p["short"]["units"])
         return out
 
+    def position_details(self) -> list[dict]:
+        from oandapyV20.endpoints.positions import OpenPositions
+        r = OpenPositions(self.account_id)
+        self.api.request(r)
+        rows = []
+        for p in r.response.get("positions", []):
+            qty = float(p["long"]["units"]) + float(p["short"]["units"])
+            rows.append({
+                "symbol": p["instrument"], "qty": qty,
+                "market_value": None,
+                "avg_entry_price": None,
+                "unrealized_pnl": float(p.get("unrealizedPL", 0) or 0),
+                "unrealized_pnl_pct": None,
+            })
+        return rows
+
     def submit_market_order(self, symbol: str, qty: float, side: str, spec: ContractSpec) -> dict:
         from oandapyV20.endpoints.orders import OrderCreate
         units = int(qty) * (1 if side == "buy" else -1)
@@ -183,6 +218,19 @@ class IBKRPaperAdapter(BrokerAdapter):
 
     def positions(self) -> Dict[str, float]:
         return {p.contract.localSymbol or p.contract.symbol: float(p.position) for p in self.ib.positions()}
+
+    def position_details(self) -> list[dict]:
+        rows = []
+        for p in self.ib.portfolio():
+            rows.append({
+                "symbol": p.contract.localSymbol or p.contract.symbol,
+                "qty": float(p.position),
+                "market_value": float(p.marketValue),
+                "avg_entry_price": float(p.averageCost),
+                "unrealized_pnl": float(p.unrealizedPNL),
+                "unrealized_pnl_pct": None,
+            })
+        return rows
 
     def _contract(self, symbol: str, spec: ContractSpec):
         from ib_insync import Stock, Forex, Future, Crypto
