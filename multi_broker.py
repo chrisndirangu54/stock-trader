@@ -82,6 +82,12 @@ class BrokerAdapter(ABC):
     def position_details(self) -> list[dict]:
         return [{"symbol": k, "qty": v} for k, v in self.positions().items()]
 
+    def open_orders(self) -> list[dict]:
+        return []
+
+    def account_risk(self) -> dict:
+        return {"equity": self.account_equity()}
+
     def rebalance(self, weights: Dict[str, float], prices: Dict[str, float],
                   specs: Dict[str, ContractSpec], execute: bool = False) -> list[dict]:
         equity = self.account_equity()
@@ -139,6 +145,20 @@ class AlpacaPaperAdapter(BrokerAdapter):
             })
         return rows
 
+    def open_orders(self) -> list[dict]:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        out = []
+        for o in self.client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN)):
+            out.append({"order_id": str(o.id), "symbol": o.symbol, "qty": float(o.qty or 0),
+                        "side": str(o.side), "status": str(o.status)})
+        return out
+
+    def account_risk(self) -> dict:
+        a = self.client.get_account()
+        return {"equity": float(a.equity), "buying_power": float(a.buying_power),
+                "cash": float(a.cash), "trading_blocked": bool(a.trading_blocked)}
+
     def submit_market_order(self, symbol: str, qty: float, side: str, spec: ContractSpec) -> dict:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
@@ -191,6 +211,22 @@ class OandaPracticeAdapter(BrokerAdapter):
             })
         return rows
 
+    def open_orders(self) -> list[dict]:
+        from oandapyV20.endpoints.orders import OrdersPending
+        r = OrdersPending(self.account_id)
+        self.api.request(r)
+        return [{"order_id": str(o.get("id")), "symbol": o.get("instrument"),
+                 "qty": float(o.get("units", 0) or 0), "side": "buy" if float(o.get("units",0) or 0) > 0 else "sell",
+                 "status": o.get("state", "PENDING")} for o in r.response.get("orders", [])]
+
+    def account_risk(self) -> dict:
+        from oandapyV20.endpoints.accounts import AccountSummary
+        r = AccountSummary(self.account_id)
+        self.api.request(r)
+        a = r.response["account"]
+        return {"equity": float(a["NAV"]), "margin_available": float(a.get("marginAvailable", 0)),
+                "margin_used": float(a.get("marginUsed", 0)), "margin_rate": float(a.get("marginRate", 0))}
+
     def submit_market_order(self, symbol: str, qty: float, side: str, spec: ContractSpec) -> dict:
         from oandapyV20.endpoints.orders import OrderCreate
         units = int(qty) * (1 if side == "buy" else -1)
@@ -232,6 +268,23 @@ class IBKRPaperAdapter(BrokerAdapter):
                 "unrealized_pnl_pct": None,
             })
         return rows
+
+    def open_orders(self) -> list[dict]:
+        rows = []
+        for t in self.ib.openTrades():
+            rows.append({"order_id": str(t.order.orderId),
+                         "symbol": t.contract.localSymbol or t.contract.symbol,
+                         "qty": float(t.order.totalQuantity),
+                         "side": str(t.order.action).lower(),
+                         "status": str(t.orderStatus.status)})
+        return rows
+
+    def account_risk(self) -> dict:
+        vals = {v.tag: v.value for v in self.ib.accountValues() if v.currency in ("USD", "BASE")}
+        return {"equity": float(vals.get("NetLiquidation", 0) or 0),
+                "buying_power": float(vals.get("BuyingPower", 0) or 0),
+                "available_funds": float(vals.get("AvailableFunds", 0) or 0),
+                "maint_margin_req": float(vals.get("MaintMarginReq", 0) or 0)}
 
     def _contract(self, symbol: str, spec: ContractSpec):
         from ib_insync import Stock, Forex, Future, Crypto
