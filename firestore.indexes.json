@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "investment_transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "account_id", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "investment_transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "kind", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "fund_nav_history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "fund_id", "order": "ASCENDING"},
+        {"fieldPath": "valuation_date", "order": "ASCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
