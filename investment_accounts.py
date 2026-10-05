@@ -197,8 +197,30 @@ class InvestorAccountService:
             raise ValueError("Below minimum subscription")
         nav = self.current_nav()
         units = q8(amount / nav)
-        return self._transaction(account_id, "subscription", amount, units, nav, user,
-                                 external_ref=external_ref)
+        return self._transaction(account_id, "subscription_request", amount, units, nav, user,
+                                 status="pending", external_ref=external_ref)
+
+    def approve_subscription(self, transaction_id: str, actor: AuthUser) -> None:
+        if actor.role not in {"admin", "execution_approver"}:
+            raise PermissionError("Role cannot approve subscription")
+        ref = self.db.collection("investment_transactions").document(transaction_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise KeyError(transaction_id)
+        tx = snap.to_dict()
+        if tx.get("kind") != "subscription_request" or tx.get("status") != "pending":
+            raise RuntimeError("Transaction is not a pending subscription")
+        # Re-price at the currently published NAV when cleared cash is posted.
+        nav = self.current_nav()
+        amount = D(str(tx["amount"]))
+        units = q8(amount / nav)
+        ref.update({
+            "kind": "subscription", "status": "posted", "nav": str(nav), "units": str(units),
+            "approved_by": actor.uid, "approved_at": utcnow(),
+        })
+        self.audit.log(actor, "subscription_approved",
+                       {"transaction_id": transaction_id, "nav": str(nav), "units": str(units)},
+                       severity="warning")
 
     def request_redemption(self, account_id: str, amount: Decimal, user: AuthUser) -> str:
         account = self.get_account(account_id, user)
@@ -266,6 +288,21 @@ class InvestorAccountService:
             row["id"] = d.id
             out.append(row)
         out.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        return out
+
+    def pending_subscriptions(self, actor: AuthUser, limit: int = 200) -> list[dict]:
+        if actor.role not in {"admin", "execution_approver"}:
+            raise PermissionError("Role cannot view pending subscriptions")
+        docs = (self.db.collection("investment_transactions")
+                .where("kind", "==", "subscription_request")
+                .where("status", "==", "pending")
+                .limit(limit).stream())
+        out = []
+        for d in docs:
+            row = d.to_dict()
+            row["id"] = d.id
+            out.append(row)
+        out.sort(key=lambda x: str(x.get("created_at", "")))
         return out
 
     def pending_redemptions(self, actor: AuthUser, limit: int = 200) -> list[dict]:
