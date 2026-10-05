@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "@firebase/auth";
 import { BadgeCheck, CircleDollarSign, FileText, LayoutDashboard, LogOut, ShieldCheck, Users, WalletCards } from "lucide-react";
 import { auth } from "./firebase";
 import { api } from "./api";
